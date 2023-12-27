@@ -57,7 +57,8 @@ class WaveGANGenerator(nn.Module):
         self.verbose = verbose
         # "Dense" is the same meaning as fully connection.
         #self.fc1 = nn.Linear(latent_dim, 10 * model_size)
-
+        self.conditional = nn.Parameter(torch.rand(size=(2, 8, 5000)), requires_grad=True)
+        
         stride = 4
         if upsample:
             stride = 1
@@ -85,8 +86,8 @@ class WaveGANGenerator(nn.Module):
             if isinstance(m, nn.ConvTranspose1d) or isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight.data)
 
-    def forward(self, x):
-
+    def forward(self, x, label):
+        x += self.conditional[label]
         #print("x shape:", x.shape)
         conv_1_out = F.leaky_relu(self.conv_1(x)) # x = (bs, 8, 5000)
        # print("conv_1_out shape:", conv_1_out.shape)
@@ -218,6 +219,7 @@ class WaveGANDiscriminator(nn.Module):
                 nn.init.kaiming_normal_(m.weight.data)
 
     def forward(self, x):
+
         x = F.leaky_relu(self.conv1(x), negative_slope=self.alpha)
         if self.verbose:
             print(x.shape)

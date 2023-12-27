@@ -19,20 +19,27 @@ from torch.autograd import Variable
 from torchsummary import summary
 from torch import autograd
 
+import matplotlib.pyplot as plt
 
 # Model specific
 
-from data.ecg_data_loader import ECGDataSimple as ecg_data
+import sys
+sys.path.append("../../data")
+from PTBXLToDataset import CVConditional
+
+# from data.ecg_data_loader import ECGDataSimple as ecg_data
 from models.pulse2pulse import WaveGANGenerator as Pulse2PuseGenerator
 from models.pulse2pulse import WaveGANDiscriminator as Pulse2PulseDiscriminator
 from utils.utils import calc_gradient_penalty, get_plots_RHTM_10s, get_plots_all_RHTM_10s
+
+
 
 torch.manual_seed(0)
 np.random.seed(0)
 parser = argparse.ArgumentParser()
 
 # Hardware
-parser.add_argument("--device_id", type=int, default=0, help="Device ID to run the code")
+parser.add_argument("--device_id", type=int, default=1, help="Device ID to run the code")
 parser.add_argument("--exp_name", type=str, required=True, help="A name to the experiment which is used to save checkpoitns and tensorboard output")
 # parser.add_argument("--py_file",default=os.path.abspath(__file__)) # store current python file
 
@@ -40,15 +47,15 @@ parser.add_argument("--exp_name", type=str, required=True, help="A name to the e
 #==============================
 # Directory and file handling
 #==============================
-parser.add_argument("--data_dirs", default=["/home/vajira/DL/Pulse2Pulse/sample_ecg_data", 
-                                            ], help="Data roots", nargs="*")
+# parser.add_argument("--data_dirs", default=["/home/vajira/DL/Pulse2Pulse/sample_ecg_data", 
+#                                             ], help="Data roots", nargs="*")
 
 parser.add_argument("--out_dir", 
-                    default="/home/vajira/DL/Pulse2Pulse_out/output",
+                    default="./output",
                     help="Main output dierectory")
 
 parser.add_argument("--tensorboard_dir", 
-                    default="/home/vajira/DL/Pulse2Pulse_out/tensorboard",
+                    default="./tensorboard",
                     help="Folder to save output of tensorboard")
 #======================
 # Hyper parameters
@@ -61,7 +68,8 @@ parser.add_argument("--b2", type=float, default=0.9, help="adam: decay of first 
 parser.add_argument("--num_epochs", type=int, default=4000, help="number of epochs of training")
 parser.add_argument("--start_epoch", type=int, default=0, help="Start epoch in retraining")
 parser.add_argument("--ngpus", type=int, default=1, help="Number of GPUs used in models")
-parser.add_argument("--checkpoint_interval", type=int, default=25, help="Interval to save checkpoint models")
+parser.add_argument("--checkpoint_interval", type=int, default=1, help="Interval to plot model results")
+parser.add_argument("--save_interval", type=int, default=100, help="Interval to save models")
 
 # Checkpoint path to retrain or test models
 parser.add_argument("--checkpoint_path", default="", help="Check point path to retrain or test models")
@@ -69,6 +77,7 @@ parser.add_argument("--checkpoint_path", default="", help="Check point path to r
 parser.add_argument('-ms', '--model_size', type=int, default=50,
                         help='Model size parameter used in WaveGAN')
 parser.add_argument('--lmbda', default=10.0, help="Gradient penalty regularization factor")
+parser.add_argument('--fold_idx', default=0, help="Fold number")
 
 # Action handling 
 parser.add_argument("action", type=str, help="Select an action to run", choices=["train", "retrain", "inference", "check"])
@@ -94,7 +103,7 @@ os.makedirs(opt.out_dir, exist_ok=True)
 
 
 # make subfolder in the output folder 
-checkpoint_dir = os.path.join(opt.out_dir, opt.exp_name + "/checkpoints")
+checkpoint_dir = os.path.join(opt.out_dir, opt.exp_name + "/cps")
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 # make tensorboard subdirectory for the experiment
@@ -114,13 +123,15 @@ writer = SummaryWriter(tensorboard_exp_dir)
 # Prepare Data
 #==========================================
 def prepare_data():
-    dataset =  ecg_data(opt.data_dirs, norm_num=6000, cropping=None, transform=None)
+    dataset = CVConditional(diag_name="MI", size=500, fold=opt.fold_idx, 
+                            data_path='/gim/lv02/isviridov/code/gans/gan_ecg/data/',
+                            smooth=False, filter=False, option="train", type='gan_sample')
     print("Dataset size=", len(dataset))
     
     dataloader = torch.utils.data.DataLoader( dataset,
         batch_size=opt.bs,
         shuffle=True,
-        num_workers=8
+        num_workers=0
     )
 
     return dataloader
@@ -130,7 +141,7 @@ def prepare_data():
 #===============================================
 def prepare_model():
     netG = Pulse2PuseGenerator(model_size=opt.model_size, ngpus=opt.ngpus, upsample=True)
-    netD = Pulse2PulseDiscriminator(model_size=opt.model_size, ngpus=opt.ngpus)
+    netD = Pulse2PulseDiscriminator(model_size=opt.model_size, ngpus=opt.ngpus, verbose=False)
 
     netG = netG.to(device)
     netD = netD.to(device)
@@ -150,10 +161,10 @@ def run_train():
 
 def train(netG, netD, optimizerG, optimizerD, dataloader):
 
-    for epoch in tqdm(range(opt.start_epoch + 1, opt.start_epoch + opt.num_epochs + 1)):
+    for epoch in tqdm(range(opt.start_epoch, opt.start_epoch + opt.num_epochs)):
 
         len_dataloader = len(dataloader)
-        #print("Length of Dataloader:", len_dataloader)
+        print("Length of Dataloader:", len_dataloader)
 
         train_G_flag = False
         D_cost_train_epoch = []
@@ -164,8 +175,6 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
 
             if (i+1) % 5 == 0:
                 train_G_flag = True
-
-
 
             # Set Discriminator parameters to require gradients.
             #print(train_G_flag)
@@ -183,7 +192,7 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
             # (1) Train Discriminator
             #############################
 
-            real_ecgs = sample["ecg_signals"].to(device)
+            real_ecgs = sample["image"].to(device)
             #print("real ecgs shape", real_ecgs.shape)
             b_size = real_ecgs.size(0)
 
@@ -203,7 +212,7 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
             D_real.backward(neg_one)  # loss * -1
 
             # b) compute loss contribution from generated data, then backprop.
-            fake = autograd.Variable(netG(noise_Var).data)
+            fake = autograd.Variable(netG(noise_Var, sample["label"]).data)
             D_fake = netD(fake)
             D_fake = D_fake.mean()
             D_fake.backward(one)
@@ -246,7 +255,8 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
                 noise = noise.to(device)
                 noise_Var = Variable(noise, requires_grad=False)
 
-                fake = netG(noise_Var)
+                fake = netG(noise_Var, sample["label"])
+                # print(fake.shape)
                 G = netD(fake)
                 G = G.mean()
 
@@ -267,9 +277,9 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
 
                 #print("real ecg:", real_ecgs.shape)
                 #print("fake ecg:", fake.shape)
-            if i == 0: # take the first batch to plot
-                real_ecgs_to_plot = real_ecgs
-                fake_to_plot = fake
+            # if i == 0: # take the first batch to plot
+            #     real_ecgs_to_plot = real_ecgs
+            #     fake_to_plot = fake
             #    break
         #print(G_cost_epoch)
 
@@ -285,15 +295,32 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
         print("Epochs:{}\t\tD_cost:{}\t\t D_wass:{}\t\tG_cost:{}".format(
                     epoch, D_cost_train_epoch_avg, D_wass_train_epoch_avg, G_cost_epoch_avg))
 
-         # Save model
+         
         if epoch % opt.checkpoint_interval == 0:
+            
+            for label_i in [0,1]:
+                fig, axs = plt.subplots(3, 2, figsize=(20, 12))
+                noise = torch.Tensor(2, 8, 5000).uniform_(-1, 1).to(device)
+                with torch.no_grad():
+                    fake = netG(noise, label_i).cpu().numpy()
+                    # import pdb
+                    # pdb.set_trace()
+                    fig.suptitle("Generated I, III and VI leads for class {}".format(label_i))
+                    for i in range(2):
+                        axs[0][i].plot(fake[i][0])
+                        axs[1][i].plot(fake[i][1])
+                        axs[2][i].plot(fake[i][2])
+                # plt.savefig("test.png")
+                writer.add_figure('label_{}/generated ecgs'.format(label_i), fig, epoch)
+                    
+            # fig = get_plots_RHTM_10s(real_ecgs_to_plot[0].detach().cpu(), fake_to_plot[0].detach().cpu())
+            # fig_2 = get_plots_all_RHTM_10s(real_ecgs_to_plot.detach().cpu(), fake_to_plot.detach().cpu())
+            # writer.add_figure("sample", fig, epoch)
+            # writer.add_figure("sample_batch", fig_2, epoch)
+            
+        # Save model    
+        if epoch % opt.save_interval == 0:
             save_model(netG, netD, optimizerG, optimizerD, epoch)
-            fig = get_plots_RHTM_10s(real_ecgs_to_plot[0].detach().cpu(), fake_to_plot[0].detach().cpu())
-            fig_2 = get_plots_all_RHTM_10s(real_ecgs_to_plot.detach().cpu(), fake_to_plot.detach().cpu())
-
-            writer.add_figure("sample", fig, epoch)
-            writer.add_figure("sample_batch", fig_2, epoch)
-        #fig.savefig("{}.png".format(epoch))
 
 
 #=====================================
@@ -301,7 +328,7 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
 #=====================================
 def save_model(netG, netD, optimizerG, optimizerD,  epoch):
    
-    check_point_name = py_file_name + "_epoch:{}.pt".format(epoch) # get code file name and make a name
+    check_point_name = "gan_p2p" + "_epoch:{}.pt".format(epoch) # get code file name and make a name
     check_point_path = os.path.join(checkpoint_dir, check_point_name)
     # save torch model
     torch.save({
@@ -369,15 +396,15 @@ if __name__ == "__main__":
 
     # Train or retrain or inference
     if opt.action == "train":
-        print("Training process is strted..!")
+        print("Training process is started..!")
         run_train()
         pass
     elif opt.action == "retrain":
-        print("Retrainning process is strted..!")
+        print("Retrainning process is started..!")
         run_retrain()
         pass
     elif opt.action == "inference":
-        print("Inference process is strted..!")
+        print("Inference process is started..!")
         pass
     elif opt.action == "check":
         check_model_graph()
