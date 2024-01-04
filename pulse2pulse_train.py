@@ -103,7 +103,7 @@ os.makedirs(opt.out_dir, exist_ok=True)
 
 
 # make subfolder in the output folder 
-checkpoint_dir = os.path.join(opt.out_dir, opt.exp_name + "/cps")
+checkpoint_dir = os.path.join(opt.out_dir, opt.exp_name + '_' + "fold_" + str(opt.fold_idx) + "/cps")
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 # make tensorboard subdirectory for the experiment
@@ -161,7 +161,7 @@ def run_train():
 
 def train(netG, netD, optimizerG, optimizerD, dataloader):
 
-    for epoch in tqdm(range(opt.start_epoch, opt.start_epoch + opt.num_epochs)):
+    for epoch in tqdm(range(opt.start_epoch+1, opt.num_epochs+1)):
 
         len_dataloader = len(dataloader)
         print("Length of Dataloader:", len_dataloader)
@@ -192,7 +192,9 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
             # (1) Train Discriminator
             #############################
 
-            real_ecgs = sample["image"].to(device)
+
+            image, label = sample
+            real_ecgs = image.to(device)
             #print("real ecgs shape", real_ecgs.shape)
             b_size = real_ecgs.size(0)
 
@@ -212,7 +214,7 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
             D_real.backward(neg_one)  # loss * -1
 
             # b) compute loss contribution from generated data, then backprop.
-            fake = autograd.Variable(netG(noise_Var, sample["label"]).data)
+            fake = autograd.Variable(netG(noise_Var, label).data)
             D_fake = netD(fake)
             D_fake = D_fake.mean()
             D_fake.backward(one)
@@ -255,7 +257,7 @@ def train(netG, netD, optimizerG, optimizerD, dataloader):
                 noise = noise.to(device)
                 noise_Var = Variable(noise, requires_grad=False)
 
-                fake = netG(noise_Var, sample["label"])
+                fake = netG(noise_Var, label)
                 # print(fake.shape)
                 G = netD(fake)
                 G = G.mean()
