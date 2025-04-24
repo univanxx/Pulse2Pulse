@@ -44,7 +44,7 @@ class Transpose1dLayer_multi_input(nn.Module):
 
 
 class WaveGANGenerator(nn.Module):
-    def __init__(self, model_size=50, ngpus=1, num_channels=8,
+    def __init__(self, num_classes, model_size=50, ngpus=1, num_channels=8,
                  #latent_dim=100, 
                  post_proc_filt_len=512,
                  verbose=False, upsample=True):
@@ -57,7 +57,7 @@ class WaveGANGenerator(nn.Module):
         self.verbose = verbose
         # "Dense" is the same meaning as fully connection.
         #self.fc1 = nn.Linear(latent_dim, 10 * model_size)
-        self.conditional = nn.Parameter(torch.rand(size=(2, 8, 5000)), requires_grad=True)
+        self.conditional = nn.Parameter(torch.rand(size=(num_classes, 8, 5000)), requires_grad=True)
         
         stride = 4
         if upsample:
@@ -87,7 +87,8 @@ class WaveGANGenerator(nn.Module):
                 nn.init.kaiming_normal_(m.weight.data)
 
     def forward(self, x, label):
-        x += self.conditional[label]
+        conditional = (self.conditional * label.unsqueeze(2).unsqueeze(3)).sum(axis=1)
+        x += conditional
         #print("x shape:", x.shape)
         conv_1_out = F.leaky_relu(self.conv_1(x)) # x = (bs, 8, 5000)
        # print("conv_1_out shape:", conv_1_out.shape)
