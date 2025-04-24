@@ -25,7 +25,7 @@ class Transpose1dLayer(nn.Module):
 
 
 class WaveGANGenerator(nn.Module):
-    def __init__(self, model_size=50, ngpus=1, num_channels=8,
+    def __init__(self, num_classes, model_size=50, ngpus=1, num_channels=8,
                  latent_dim=100, post_proc_filt_len=512,
                  verbose=False, upsample=True):
         super(WaveGANGenerator, self).__init__()
@@ -37,7 +37,7 @@ class WaveGANGenerator(nn.Module):
         self.verbose = verbose
         # "Dense" is the same meaning as fully connection.
         self.fc1 = nn.Linear(latent_dim, 10 * model_size)
-        self.conditional = nn.Parameter(torch.rand(size=(2, latent_dim)), requires_grad=True)
+        self.conditional = nn.Parameter(torch.rand(size=(num_classes, latent_dim)), requires_grad=True)
 
         stride = 4
         if upsample:
@@ -60,8 +60,9 @@ class WaveGANGenerator(nn.Module):
 
     def forward(self, x, label):
 
-        x += self.conditional[label]
-        x = self.fc1(x).view(-1, 5*self.model_size, 2) #x = self.fc1(x).view(-1, 16 * self.model_size, 16)
+        conditional = (self.conditional * label.unsqueeze(2)).sum(axis=1)
+        x += conditional
+        x = self.fc1(x).view(-1, 5*self.model_size, 2)
         x = F.relu(x)
         if self.verbose:
             print(x.shape)
