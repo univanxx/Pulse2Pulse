@@ -8,7 +8,7 @@ clear && python wavegan_star_train.py \
     --exp_name wavegan_star_model \
     --checkpoint_interval 100 \
     --save_interval 100 \
-    --num_epochs 3000 \
+    --num_epochs 2700 \
     --start_epoch 0 \
     --bs 32 \
     --lr 0.0001 \
