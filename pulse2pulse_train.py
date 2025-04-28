@@ -6,6 +6,7 @@ import argparse
 import os
 from tqdm import tqdm
 import numpy as np
+import pickle
 
 #Pytorch
 import torch
@@ -126,7 +127,12 @@ writer = SummaryWriter(tensorboard_exp_dir)
 # Prepare Data
 #==========================================
 def prepare_data():
-    dataset = ECGDataset(opt.data_dir, "ptb-xl", option="train")
+
+    with open(os.path.join(opt.data_dir, "label2id.pickle"), "rb") as f:
+        label2id = pickle.load(f)
+    selected_classes = ['426783006', '39732003', '164873001', '164889003', '427084000', '270492004', '426177001', '164934002']
+
+    dataset = ECGDataset(opt.data_dir, "ptb-xl", label2id, selected_classes, option="train")
     print("Dataset size=", len(dataset))
     
     dataloader = torch.utils.data.DataLoader( dataset,
@@ -135,7 +141,7 @@ def prepare_data():
         num_workers=0
     )
 
-    return dataloader, len(dataset.label2id)
+    return dataloader, len(selected_classes)
 
 #===============================================
 # Prepare models
